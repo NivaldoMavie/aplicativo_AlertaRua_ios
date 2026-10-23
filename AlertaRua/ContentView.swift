@@ -1,54 +1,62 @@
 import SwiftUI
 
-// Estrutura principal da interface que gerencia as tres abas de navegacao
+// Estrutura principal da aplicacao AlertaRua
+// Integra os ecras do Cidadao, o Portal Operacional do Municipio da Beira e o Painel Estatistico
 struct ContentView: View {
-    // Fonte unica da verdade compartilhada para o estado do aplicativo
+    // Fonte unica da verdade gerenciada pelo DenunciaStore
     @StateObject private var store = DenunciaStore()
 
-    // Controle do indice da aba ativa (0: Ocorrencias, 1: Denunciar, 2: Resumo)
+    // Controle da aba ativa na barra de navegacao inferior
     @State private var abaSelecionada = 0
 
     var body: some View {
         TabView(selection: $abaSelecionada) {
-            // Primeira aba: Listagem, pesquisa, filtros e acoes de ocorrencias
-            ListaView()
+            // Aba 1: Feed de Alertas Urbanos para os cidadaos da Beira
+            ListaAlertasView()
                 .tabItem {
-                    Label("Ocorrências", systemImage: "list.bullet.rectangle.portrait.fill")
+                    Label("Alertas", systemImage: "list.bullet.rectangle.portrait.fill")
                 }
                 .tag(0)
 
-            // Segunda aba: Formulario de criacao de nova denuncia
-            NovaDenunciaView(aba: $abaSelecionada)
+            // Aba 2: Formulario de reporte de nova ocorrencia
+            NovoAlertaView(aba: $abaSelecionada)
                 .tabItem {
-                    Label("Denunciar", systemImage: "plus.circle.fill")
+                    Label("Reportar", systemImage: "plus.circle.fill")
                 }
                 .tag(1)
 
-            // Terceira aba: Painel estatistico e metricas de resolucao
-            ResumoView()
+            // Aba 3: Painel de Gestao e Triagem do Conselho Municipal da Beira (CMB)
+            PainelMunicipioView()
+                .tabItem {
+                    Label("Município", systemImage: "building.columns.fill")
+                }
+                .tag(2)
+
+            // Aba 4: Indicadores gerais e relatorios de resolucao
+            ResumoEstatisticasView()
                 .tabItem {
                     Label("Resumo", systemImage: "chart.pie.fill")
                 }
-                .tag(2)
+                .tag(3)
         }
         .environmentObject(store)
     }
 }
 
-// MARK: - Ecra de Ocorrencias
+// MARK: - Ecra de Alertas (Visao do Municipe)
 
-// Visualizacao principal com lista de denuncias, filtros e busca por bairro
-struct ListaView: View {
+// Listagem publica de ocorrencias com busca, filtros por estado e navegacao para detalhes
+struct ListaAlertasView: View {
     @EnvironmentObject var store: DenunciaStore
     @State private var filtroSelecionado: Filtro = .todas
     @State private var textoPesquisa = ""
 
-    // Filtra as ocorrencias pelo estado selecionado e pelo termo de busca de bairro
-    private var ocorrenciasFiltradas: [Denuncia] {
-        store.denuncias.filter { denuncia in
-            let correspondeFiltro = filtroSelecionado.aceita(denuncia.estado)
+    // Filtra ocorrencias de acordo com o estado e termo de pesquisa de bairro
+    private var alertasFiltrados: [Alerta] {
+        store.alertas.filter { item in
+            let correspondeFiltro = filtroSelecionado.aceita(item.estado)
             let termoLimpo = textoPesquisa.trimmingCharacters(in: .whitespacesAndNewlines)
-            let correspondeBairro = termoLimpo.isEmpty || denuncia.bairro.localizedCaseInsensitiveContains(termoLimpo)
+            let correspondeBairro = termoLimpo.isEmpty || item.bairro.localizedCaseInsensitiveContains(termoLimpo)
             return correspondeFiltro && correspondeBairro
         }
     }
@@ -56,9 +64,9 @@ struct ListaView: View {
     var body: some View {
         NavigationStack {
             List {
-                // Secao de selecao de filtro rapido por estado
+                // Filtros em barra segmentada
                 Section {
-                    Picker("Filtrar ocorrências", selection: $filtroSelecionado) {
+                    Picker("Filtro de Estado", selection: $filtroSelecionado) {
                         ForEach(Filtro.allCases) { item in
                             Text(item.rawValue).tag(item)
                         }
@@ -66,17 +74,16 @@ struct ListaView: View {
                     .pickerStyle(.segmented)
                 }
 
-                // Secao principal com total de resultados e lista de registros
+                // Lista de ocorrencias cadastradas
                 Section {
-                    if ocorrenciasFiltradas.isEmpty {
-                        // Mensagem amigavel exibida quando nenhum registro corresponde aos criterios
+                    if alertasFiltrados.isEmpty {
                         VStack(spacing: 12) {
                             Image(systemName: "magnifyingglass.circle")
                                 .font(.system(size: 44))
                                 .foregroundStyle(.secondary)
-                            Text("Nenhuma ocorrência encontrada")
+                            Text("Nenhum alerta encontrado")
                                 .font(.headline)
-                            Text("Tente alterar o filtro ou o termo de pesquisa por bairro.")
+                            Text("Tente alterar o filtro ou pesquisar por outro bairro da Beira.")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                                 .multilineTextAlignment(.center)
@@ -84,43 +91,40 @@ struct ListaView: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 24)
                     } else {
-                        ForEach(ocorrenciasFiltradas) { item in
-                            LinhaDenuncia(denuncia: item)
-                                // Deslizar para a direita (leading) para avancar o estado da ocorrencia
-                                .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                                    if item.estado != .resolvido {
-                                        Button {
-                                            withAnimation {
-                                                store.avancarEstado(item)
-                                            }
-                                        } label: {
-                                            if item.estado == .pendente {
-                                                Label("Em resolução", systemImage: "clock.arrow.2.circlepath")
-                                            } else {
-                                                Label("Resolver", systemImage: "checkmark.circle.fill")
-                                            }
-                                        }
-                                        .tint(item.estado == .pendente ? .orange : .green)
-                                    }
-                                }
-                                // Deslizar para a esquerda (trailing) para apagar a ocorrencia
-                                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                    Button(role: .destructive) {
+                        ForEach(alertasFiltrados) { item in
+                            NavigationLink(destination: DetalheAlertaView(alertaId: item.id)) {
+                                LinhaAlerta(alerta: item)
+                            }
+                            // Deslizar para a direita para avancar o ciclo de vida
+                            .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                                if item.estado != .resolvido {
+                                    Button {
                                         withAnimation {
-                                            store.remover(id: item.id)
+                                            store.avancarEstado(item)
                                         }
                                     } label: {
-                                        Label("Apagar", systemImage: "trash.fill")
+                                        Label(item.estado == .pendente ? "Aceitar" : "Avançar", systemImage: "arrow.right.circle.fill")
                                     }
+                                    .tint(item.estado == .pendente ? .purple : .green)
                                 }
+                            }
+                            // Deslizar para a esquerda para apagar o registro
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                Button(role: .destructive) {
+                                    withAnimation {
+                                        store.remover(id: item.id)
+                                    }
+                                } label: {
+                                    Label("Apagar", systemImage: "trash.fill")
+                                }
+                            }
                         }
                     }
                 } header: {
-                    // Exibicao clara do total de resultados filtrados
                     HStack {
-                        Text("Ocorrências")
+                        Text("Ocorrências na Beira")
                         Spacer()
-                        Text("Total: \(ocorrenciasFiltradas.count)")
+                        Text("Total: \(alertasFiltrados.count)")
                             .font(.caption.bold())
                             .foregroundStyle(.secondary)
                             .textCase(.none)
@@ -133,31 +137,31 @@ struct ListaView: View {
     }
 }
 
-// Componente responsavel pela apresentacao visual de cada linha de ocorrencia
-struct LinhaDenuncia: View {
+// Linha de apresentacao resumida de cada alerta
+struct LinhaAlerta: View {
     @EnvironmentObject var store: DenunciaStore
-    let denuncia: Denuncia
+    let alerta: Alerta
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            // Cabecalho da linha: icone de categoria, bairro, data relativa e estado
+        VStack(alignment: .leading, spacing: 8) {
+            // Cabecalho com icone da categoria, bairro, data relativa e estado
             HStack(alignment: .top, spacing: 12) {
-                Image(systemName: denuncia.categoria.icone)
+                Image(systemName: alerta.categoria.icone)
                     .foregroundStyle(.white)
                     .font(.system(size: 16, weight: .bold))
                     .frame(width: 38, height: 38)
-                    .background(denuncia.categoria.cor, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .background(alerta.categoria.cor, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(denuncia.categoria.rawValue)
+                    Text(alerta.categoria.rawValue)
                         .font(.headline)
 
                     HStack(spacing: 4) {
                         Image(systemName: "mappin.and.ellipse")
                             .font(.caption2)
-                        Text(denuncia.bairro)
+                        Text(alerta.bairro)
                         Text("·")
-                        Text(denuncia.data.formatted(.relative(presentation: .named)))
+                        Text(alerta.data.formatted(.relative(presentation: .named)))
                     }
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -165,60 +169,68 @@ struct LinhaDenuncia: View {
 
                 Spacer()
 
-                // Tag visual do estado atual da ocorrencia
-                Text(denuncia.estado.rawValue)
+                // Tag do estado atual
+                Text(alerta.estado.rawValue)
                     .font(.caption2.weight(.bold))
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
-                    .background(denuncia.estado.cor.opacity(0.15), in: Capsule())
-                    .foregroundStyle(denuncia.estado.cor)
+                    .background(alerta.estado.cor.opacity(0.16), in: Capsule())
+                    .foregroundStyle(alerta.estado.cor)
             }
 
-            // Descricao em texto fornecida pelo cidadao
-            Text(denuncia.descricao)
+            // Descricao em texto
+            Text(alerta.descricao)
                 .font(.subheadline)
                 .foregroundStyle(.primary)
-                .fixedSize(horizontal: false, vertical: true)
+                .lineLimit(2)
 
-            // Botao interativo para apoiar a denuncia com contagem
+            // Linha inferior com brigada e botao Eu tambem vi
             HStack {
+                if let equipa = alerta.equipaAtribuida {
+                    Label(equipa, systemImage: "person.2.badge.gearshape")
+                        .font(.caption2)
+                        .foregroundStyle(Color.accentColor)
+                }
+
+                Spacer()
+
                 Button {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
-                        store.apoiar(denuncia)
+                        store.apoiar(alerta)
                     }
                 } label: {
-                    HStack(spacing: 6) {
+                    HStack(spacing: 5) {
                         Image(systemName: "hand.thumbsup.fill")
                         Text("Eu também vi")
-                        Text("(\(denuncia.apoios))")
+                        Text("(\(alerta.apoios))")
                             .fontWeight(.semibold)
                     }
-                    .font(.footnote)
+                    .font(.caption)
                     .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
+                    .padding(.vertical, 4)
                     .background(Color.accentColor.opacity(0.12), in: Capsule())
                 }
                 .buttonStyle(.borderless)
-
-                Spacer()
             }
         }
         .padding(.vertical, 4)
     }
 }
 
-// MARK: - Ecra de Denunciar
+// MARK: - Ecra de Reportar (Novo Alerta)
 
-// Formulario para submissao de novas ocorrencias urbanas
-struct NovaDenunciaView: View {
+// Formulario de envio de problemas com validacao de 10 caracteres e prioridades
+struct NovoAlertaView: View {
     @EnvironmentObject var store: DenunciaStore
     @Binding var aba: Int
 
     @State private var categoriaSelecionada: Categoria = .buraco
     @State private var bairroSelecionado = bairros[0]
+    @State private var pontoReferencia = ""
+    @State private var prioridadeSelecionada: Prioridade = .media
     @State private var descricaoTexto = ""
 
-    // Validacao: ignora espacos em branco nas extremidades e exige no minimo 10 caracteres
+    // Validacao que remove espacos em branco nas pontas
     private var descricaoLimpa: String {
         descricaoTexto.trimmingCharacters(in: .whitespacesAndNewlines)
     }
@@ -230,8 +242,8 @@ struct NovaDenunciaView: View {
     var body: some View {
         NavigationStack {
             Form {
-                // Selecao de uma das quatro categorias
-                Section("Tipo de problema") {
+                // Selecao da categoria
+                Section("Tipo de Problema") {
                     Picker("Categoria", selection: $categoriaSelecionada) {
                         ForEach(Categoria.allCases) { item in
                             Label(item.rawValue, systemImage: item.icone)
@@ -240,25 +252,37 @@ struct NovaDenunciaView: View {
                     }
                 }
 
-                // Selecao de um dos oito bairros da Beira
-                Section("Localização") {
+                // Selecao do bairro e ponto de referencia
+                Section("Localização na Beira") {
                     Picker("Bairro", selection: $bairroSelecionado) {
-                        ForEach(bairros, id: \.self) { nomeBairro in
-                            Text(nomeBairro).tag(nomeBairro)
+                        ForEach(bairros, id: \.self) { nome in
+                            Text(nome).tag(nome)
                         }
                     }
+
+                    TextField("Ponto de referência (opcional)", text: $pontoReferencia)
                 }
 
-                // Campo multilinhas de descricao com validacao e contador
+                // Gravidade da ocorrencia
+                Section("Nível de Urgência") {
+                    Picker("Prioridade", selection: $prioridadeSelecionada) {
+                        ForEach(Prioridade.allCases) { nivel in
+                            Label(nivel.rawValue, systemImage: nivel.icone)
+                                .tag(nivel)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
+
+                // Descricao com contador de caracteres
                 Section {
                     TextField(
-                        "Descreva a ocorrência com detalhes (rua, ponto de referência...)",
+                        "Descreva o problema em detalhe (mínimo 10 caracteres)...",
                         text: $descricaoTexto,
                         axis: .vertical
                     )
                     .lineLimit(3...6)
 
-                    // Contador visual de caracteres com informacao de validade
                     HStack {
                         Spacer()
                         Text("\(descricaoLimpa.count)/10 caracteres (mínimo 10)")
@@ -268,19 +292,19 @@ struct NovaDenunciaView: View {
                             )
                     }
                 } header: {
-                    Text("Descrição do problema")
+                    Text("Descrição Detalhada")
                 } footer: {
-                    Text("A descrição deve conter no mínimo 10 caracteres válidos para ser enviada.")
+                    Text("Forneça informações claras para ajudar a brigada técnica do município.")
                 }
 
-                // Botao de envio desativado enquanto o texto for invalido
+                // Botao de envio
                 Section {
                     Button {
-                        submeterDenuncia()
+                        submeterAlerta()
                     } label: {
                         HStack {
                             Spacer()
-                            Label("Enviar Denúncia", systemImage: "paperplane.fill")
+                            Label("Enviar Alerta", systemImage: "paperplane.fill")
                                 .fontWeight(.semibold)
                             Spacer()
                         }
@@ -288,93 +312,91 @@ struct NovaDenunciaView: View {
                     .disabled(!formularioValido)
                 }
             }
-            .navigationTitle("Nova Denúncia")
+            .navigationTitle("Novo Alerta")
         }
     }
 
-    // Cria a nova denuncia, insere no topo, limpa os campos e retorna a primeira aba
-    private func submeterDenuncia() {
+    private func submeterAlerta() {
         guard formularioValido else { return }
 
-        let nova = Denuncia(
+        let novo = Alerta(
             categoria: categoriaSelecionada,
             descricao: descricaoLimpa,
             bairro: bairroSelecionado,
+            pontoReferencia: pontoReferencia.trimmingCharacters(in: .whitespacesAndNewlines),
+            prioridade: prioridadeSelecionada,
             data: Date(),
             estado: .pendente,
             apoios: 0
         )
 
-        // Adiciona no topo da lista com animacao
         withAnimation {
-            store.adicionar(nova)
+            store.adicionar(novo)
         }
 
-        // Limpa os campos do formulario apos o envio bem-sucedido
+        // Limpeza dos campos e retorno ao feed
         descricaoTexto = ""
+        pontoReferencia = ""
         categoriaSelecionada = .buraco
+        prioridadeSelecionada = .media
         bairroSelecionado = bairros[0]
-
-        // Redireciona o usuario imediatamente de volta para a aba de Ocorrencias
         aba = 0
     }
 }
 
-// MARK: - Ecra de Resumo
+// MARK: - Ecra de Resumo e Estatisticas
 
-// Painel de indicadores com estatisticas em tempo real das denuncias
-struct ResumoView: View {
+// Painel com indicadores operacionais da cidade e taxas de conclusao
+struct ResumoEstatisticasView: View {
     @EnvironmentObject var store: DenunciaStore
 
-    // Contadores gerais calculados a partir dos dados atuais da loja
-    private var totalOcorrencias: Int {
-        store.denuncias.count
+    private var totalAlertas: Int {
+        store.alertas.count
     }
 
     private func contarPorEstado(_ estado: Estado) -> Int {
-        store.denuncias.filter { $0.estado == estado }.count
+        store.alertas.filter { $0.estado == estado }.count
     }
 
     private func contarPorCategoria(_ categoria: Categoria) -> Int {
-        store.denuncias.filter { $0.categoria == categoria }.count
+        store.alertas.filter { $0.categoria == categoria }.count
     }
 
-    // Taxa de resolucao em formato percentual (0.0 a 1.0)
     private var taxaResolucao: Double {
-        guard totalOcorrencias > 0 else { return 0.0 }
-        return Double(contarPorEstado(.resolvido)) / Double(totalOcorrencias)
+        guard totalAlertas > 0 else { return 0.0 }
+        return Double(contarPorEstado(.resolvido)) / Double(totalAlertas)
     }
 
     var body: some View {
         NavigationStack {
             List {
-                // Cartao de destaque com total geral de denuncias cadastradas
+                // Cartao principal com total de alertas
                 Section {
                     HStack {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("Total de Ocorrências")
+                            Text("Total de Alertas Registados")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
-                            Text("\(totalOcorrencias)")
+                            Text("\(totalAlertas)")
                                 .font(.system(size: 34, weight: .bold, design: .rounded))
                         }
                         Spacer()
-                        Image(systemName: "exclamationmark.bubble.fill")
+                        Image(systemName: "chart.bar.xaxis")
                             .font(.system(size: 36))
                             .foregroundStyle(Color.accentColor)
                     }
                     .padding(.vertical, 6)
                 }
 
-                // Metricas de progresso e porcentagem de resolucao
-                Section("Taxa de Resolução") {
+                // Indicador de taxa de resolucao
+                Section("Taxa de Resolução Municipal") {
                     VStack(alignment: .leading, spacing: 10) {
                         HStack {
                             Text("\(Int(taxaResolucao * 100))%")
                                 .font(.title2.bold())
                                 .foregroundStyle(.green)
                             Spacer()
-                            Text("\(contarPorEstado(.resolvido)) de \(totalOcorrencias) resolvidas")
+                            Text("\(contarPorEstado(.resolvido)) de \(totalAlertas) resolvidos")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                         }
@@ -385,8 +407,8 @@ struct ResumoView: View {
                     .padding(.vertical, 4)
                 }
 
-                // Distribuicao de contagem por cada estado de resolucao
-                Section("Por Estado") {
+                // Estatisticas divididas por estado
+                Section("Distribuição por Estado") {
                     ForEach(Estado.allCases, id: \.self) { itemEstado in
                         HStack {
                             Circle()
@@ -402,21 +424,19 @@ struct ResumoView: View {
                     }
                 }
 
-                // Distribuicao das ocorrencias pelas quatro categorias de problemas
-                Section("Por Categoria") {
+                // Estatisticas divididas por categoria
+                Section("Ocorrências por Categoria") {
                     ForEach(Categoria.allCases) { itemCategoria in
                         VStack(alignment: .leading, spacing: 6) {
                             HStack {
                                 Label(itemCategoria.rawValue, systemImage: itemCategoria.icone)
-                                    .foregroundStyle(.primary)
                                 Spacer()
                                 Text("\(contarPorCategoria(itemCategoria))")
                                     .font(.body.weight(.semibold))
                                     .foregroundStyle(.secondary)
                             }
 
-                            // Barra de proporcao de cada categoria em relacao ao total
-                            let proporcao = totalOcorrencias == 0 ? 0.0 : Double(contarPorCategoria(itemCategoria)) / Double(totalOcorrencias)
+                            let proporcao = totalAlertas == 0 ? 0.0 : Double(contarPorCategoria(itemCategoria)) / Double(totalAlertas)
                             ProgressView(value: proporcao)
                                 .tint(itemCategoria.cor)
                         }
@@ -424,7 +444,7 @@ struct ResumoView: View {
                     }
                 }
             }
-            .navigationTitle("Resumo")
+            .navigationTitle("Estatísticas")
         }
     }
 }
